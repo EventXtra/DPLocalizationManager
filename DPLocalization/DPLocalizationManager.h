@@ -70,6 +70,7 @@
 + (NSString *)preferredLanguage;
 
 @property(nonatomic, copy) NSString *localizationFileName;
+@property BOOL usingPlist;
 
 @end
 
@@ -84,6 +85,8 @@
 
 #define dp_get_current_filename() ([[DPLocalizationManager currentManager] localizationFileName])
 #define dp_set_current_filename(__FILENAME__) ([[DPLocalizationManager currentManager] setLocalizationFileName:__FILENAME__])
+
+#define dp_set_using_plist() ([[DPLocalizationManager currentManager] setUsingPlist:usingPlist])
 
 /**
  @brief Notification posted by DPLocalizationManager after currentLanguage property did changed.

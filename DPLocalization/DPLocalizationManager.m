@@ -14,12 +14,14 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
 
 @interface DPLocalizationManager ()
 @property (nonatomic, strong) NSDictionary *localizationStrings;
+@property (nonatomic, strong) NSDictionary *localizationPlist;
 @end
 
 @implementation DPLocalizationManager
 
 @synthesize currentLanguage = _currentLanguage;
 @synthesize localizationFileName = _localizationFileName;
+@synthesize usingPlist = _usingPlist;
 
 - (NSString *)currentLanguage {
     if (!_currentLanguage) {
@@ -37,6 +39,7 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
     if (newLanguage != _currentLanguage && !(newLanguage && [_currentLanguage isEqualToString:newLanguage])) {
         _currentLanguage = newLanguage;
         self.localizationStrings = nil;
+        self.localizationPlist = nil;
         [[NSNotificationCenter defaultCenter] postNotificationName:DPLanguageDidChangeNotification object:self];
 
         [[NSUserDefaults standardUserDefaults] setObject:newLanguage forKey:DPLanguagePreferenceKey];
@@ -51,8 +54,17 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
         path = path ? path : [[NSBundle mainBundle] pathForResource:localizationFileName ofType:@"strings"];
         _localizationStrings = path ? [NSDictionary dictionaryWithContentsOfFile:path] : @{};
     }
-    
+
     return _localizationStrings;
+}
+
+- (NSDictionary *)localizationPlist
+{
+    if (!_localizationPlist) {
+        NSString *path = [[NSBundle mainBundle] pathForResource:self.localizationFileName ofType:@"plist"];
+        _localizationPlist = path ? [NSDictionary dictionaryWithContentsOfFile:path] : @{};
+    }
+    return _localizationPlist;
 }
 
 #pragma mark -
@@ -90,9 +102,24 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
 
 - (NSString *)localizedStringForKey:(NSString *)key {
     NSParameterAssert([key isKindOfClass:[NSString class]]);
-    
+
     NSString *result = self.localizationStrings[key];
-    return result ? result : NSLocalizedString(key, nil);
+    if (result) {
+        return result;
+    } else {
+        if (self.usingPlist) {
+            NSDictionary *stringDictionary = [self.localizationPlist objectForKey:key];
+            NSString *language = dp_get_current_language();
+            NSString *string = [stringDictionary objectForKey:language];
+            if (string) {
+                return string;
+            } else {
+                return key;
+            }
+        } else {
+            return NSLocalizedString(key, nil);
+        }
+    }
 }
 
 - (UIImage *)localizedImageNamed:(NSString *)name {
@@ -171,8 +198,9 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
 - (void)setLocalizationFileName:(NSString *)localizationFileName
 {
     _localizationFileName = localizationFileName;
-    
+
     self.localizationStrings = nil;
+    self.localizationPlist = nil;
     [[NSNotificationCenter defaultCenter] postNotificationName:DPLanguageDidChangeNotification object:self];
 }
 
@@ -181,8 +209,23 @@ NSString * const DPLanguagePreferenceKey = @"DPLanguageKey";
     if (!_localizationFileName) {
         _localizationFileName = @"Localizable";
     }
-    
+
     return _localizationFileName;
+}
+
+- (BOOL)usingPlist
+{
+    if (!_usingPlist) {
+        _usingPlist = NO;
+    }
+
+    return _usingPlist;
+}
+
+- (void)setUsingPlist:(BOOL)usingPlist
+{
+    _usingPlist = usingPlist;
+    self.localizationPlist = nil;
 }
 
 @end
