@@ -1,7 +1,7 @@
 Pod::Spec.new do |s|
 
   s.name         = "DPLocalization"
-  s.version      = "1.0"
+  s.version      = "1.3"
   s.summary      = "iOS localization manager"
   s.description  = <<-DESC
 An iOS library that provides way to change localization inside application.
@@ -14,6 +14,6 @@ An iOS library that provides way to change localization inside application.
   s.platform     = :ios, '5.0'
   s.requires_arc = true
 
-  s.source       = { :git => "https://github.com/nullic/DPLocalizationManager.git", :tag => s.version.to_s }
+  s.source       = { :git => "https://github.com/nullic/DPLocalizationManager.git" }
   s.source_files = 'DPLocalization', 'DPLocalization/*.{h,m}'
 end
