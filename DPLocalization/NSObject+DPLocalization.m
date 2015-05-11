@@ -7,6 +7,7 @@
 //
 
 #import "NSObject+DPLocalization.h"
+#import "NSAttributedString+DPLocalization.h"
 #import "DPLocalizationManager.h"
 #import <objc/runtime.h>
 
@@ -15,6 +16,7 @@ static NSString * const kAutolocKeyKey = @"autolocKeyKey";
 static NSString * const kAutolocImageNameKey = @"autolocImageNameKey";
 static NSString * const kAutolocArgsKey = @"autolocArgsKey";
 static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
+static NSString * const kAutolocAttributedFlagKey = @"autolocAttributedFlag";
 
 
 @interface __AutolocOnDeallocContainer__ : NSObject
@@ -42,6 +44,8 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 
 @implementation NSObject (DPLocalization)
 
+#pragma mark - Setup
+
 - (void)setupAutolocalizationWithKey:(NSString *)key keyPath:(NSString *)keyPath {
     [self setupAutolocalizationWithKey:key keyPath:keyPath arguments:nil];
 }
@@ -64,6 +68,7 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 
         self.autolocKey = key;
         self.autolocKeyPath = keyPath;
+        self.autolocArgs = arguments;
         [self localize];
     }
 }
@@ -84,12 +89,12 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
     [self localize];
 }
 
-#pragma mark -
+#pragma mark - Observation
 
 - (void)addLanguageDidChangeObserver {
     void (^deallocBlock)() = objc_getAssociatedObject(self, (__bridge const void *)(kAutolocOnDeallocBlockKey));
     if (!deallocBlock) {
-        NSObject * __weak selfWeak = self;
+        NSObject * __unsafe_unretained selfWeak = self;
         id observer = [[NSNotificationCenter defaultCenter] addObserverForName:DPLanguageDidChangeNotification object:nil queue:[NSOperationQueue mainQueue] usingBlock:^(NSNotification *note) {
             __strong NSObject *selfStrong = selfWeak;
             [selfStrong localize];
@@ -106,24 +111,48 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
     objc_setAssociatedObject(self, (__bridge void *)(kAutolocOnDeallocBlockKey), nil, 0);
 }
 
-#pragma mark -
+#pragma mark - Localization flow
 
 - (void)localize {
     if (self.autolocKey && self.autolocKeyPath) {
-        NSString *resultString = DPLocalizedString(self.autolocKey, nil);
-        NSArray *args = self.autolocArgs;
-
-        if (resultString && args.count) {
-            void *argList = (void *)malloc(args.count * sizeof(id));
-            [args getObjects:(id __unsafe_unretained *)argList range:NSMakeRange(0, args.count)];
-            resultString = [[NSString alloc] initWithFormat:resultString arguments:argList];
-            free(argList);
-        }
-        [self setValue:resultString forKeyPath:self.autolocKeyPath];
+        [self localizeWithLocalizationKey:self.autolocKey arguments:self.autolocArgs keyPath:self.autolocKeyPath];
     }
 }
 
-#pragma mark -
+- (void)localizeWithLocalizationKey:(NSString *)key arguments:(NSArray *)arguments keyPath:(NSString *)keyPath {
+    NSString *resultString = DPLocalizedString(key, nil);
+
+    if (resultString && arguments.count) {
+        static NSRegularExpression *regexp = nil;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            regexp = [NSRegularExpression regularExpressionWithPattern:@"%([0-9]+\\$)??@" options:kNilOptions error:nil];
+        });
+
+        NSArray *matches = [regexp matchesInString:resultString options:kNilOptions range:NSMakeRange(0, resultString.length)];
+        NSMutableString *mutableStr = [resultString mutableCopy];
+        [matches enumerateObjectsWithOptions:NSEnumerationReverse usingBlock:^(NSTextCheckingResult *match, NSUInteger idx, BOOL *stop) {
+            NSUInteger usedIndex = idx;
+            if (match.range.length > 2) {
+                NSString *index = [resultString substringWithRange:NSMakeRange(match.range.location + 1, match.range.length - 3)];
+                usedIndex = ([index integerValue] - 1);
+            }
+
+            id subs = (arguments.count > usedIndex) ? arguments[usedIndex] : nil;
+            [mutableStr replaceCharactersInRange:match.range withString:[subs description]];
+        }];
+
+        resultString = mutableStr;
+    }
+
+    [self setLocalizedValue:resultString forKeyPath:keyPath];
+}
+
+- (void)setLocalizedValue:(NSString *)value forKeyPath:(NSString *)keyPath {
+    [self setValue:value forKeyPath:keyPath];
+}
+
+#pragma mark - Access Keys
 
 - (void)setAutolocKey:(NSString *)key {
     objc_setAssociatedObject(self, (__bridge void *)(kAutolocKeyKey), key, OBJC_ASSOCIATION_COPY);
@@ -151,9 +180,20 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 
 @end
 
+#if DPLocalization_UIKit
 #pragma mark - UIKit Additions -
+#pragma mark UILabel
 
 @implementation UILabel (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
 
 - (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
     [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"text"];
@@ -163,13 +203,39 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
     return [self autolocKey];
 }
 
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedText = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:self.textColor];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
 @end
 
 
+#pragma mark UIButton
+
 @implementation UIButton (DPLocalization)
 
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
 - (void)setAutolocalizationTitle:(NSString *)title {
-    [self setTitle:title forState:UIControlStateNormal];
+    if ([self isAttributedKey]) {
+        NSAttributedString *string = [NSAttributedString dp_attibutedStringWithString:title font:self.titleLabel.font textColor:[self titleColorForState:UIControlStateNormal]];
+        [self setAttributedTitle:string forState:UIControlStateNormal];
+    }
+    else {
+        [self setTitle:title forState:UIControlStateNormal];
+    }
 }
 
 - (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
@@ -183,7 +249,9 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 @end
 
 
-@implementation UIBarButtonItem (DPLocalization)
+#pragma mark UIBarItem
+
+@implementation UIBarItem (DPLocalization)
 
 - (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
     [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"title"];
@@ -196,7 +264,75 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 @end
 
 
+#pragma mark UITextField
+
 @implementation UITextField (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"placeholder"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedPlaceholder = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:self.textColor];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
+@end
+
+
+#pragma mark UITextView
+
+@implementation UITextView (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"text"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedText = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:self.textColor];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
+@end
+
+
+#pragma mark UISearchBar
+
+@implementation UISearchBar (DPLocalization)
 
 - (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
     [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"placeholder"];
@@ -209,18 +345,7 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 @end
 
 
-@implementation UITextView (DPLocalization)
-
-- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
-    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"text"];
-}
-
-- (NSString *)autolocalizationKey {
-    return [self autolocKey];
-}
-
-@end
-
+#pragma mark UIImageView
 
 @implementation UIImageView (DPLocalization)
 
@@ -248,6 +373,8 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 @end
 
 
+#pragma mark UIViewController
+
 @implementation UIViewController (DPLocalization)
 
 - (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
@@ -260,20 +387,213 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 
 @end
 
+#endif
 
-@implementation UIImage (DPLocalization)
 
-+ (UIImage *)localizedImageNamed:(NSString *)name {
-    return [[DPLocalizationManager currentManager] localizedImageNamed:name];
+#if DPLocalization_AppKit
+#pragma mark - AppKit Additions -
+#pragma mark NSMenuItem
+
+@implementation NSMenuItem (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
 }
 
-+ (UIImage *)autolocalizingImageNamed:(NSString *)name {
-    return [DPAutolocalizationProxy autolocalizingImageNamed:name];
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"title"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedTitle = [NSAttributedString dp_attibutedStringWithString:value font:[NSFont menuBarFontOfSize:0] textColor:nil];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
 }
 
 @end
 
+
+#pragma mark NSMenu
+
+@implementation NSMenu (DPLocalization)
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"title"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+@end
+
+
+#pragma mark NSButton
+
+@implementation NSButton (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"title"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedTitle = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:nil];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
+@end
+
+
+#pragma mark NSControl
+
+@implementation NSControl (DPLocalization)
+
+- (void)setIsAttributedKey:(BOOL)isAttributedKey {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocAttributedFlagKey), @(isAttributedKey), OBJC_ASSOCIATION_RETAIN);
+    [self localize];
+}
+
+- (BOOL)isAttributedKey {
+    return [objc_getAssociatedObject(self, (__bridge const void *)(kAutolocAttributedFlagKey)) boolValue];
+}
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"stringValue"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([self isAttributedKey]) {
+        self.attributedStringValue = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:nil];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
+@end
+
+
+#pragma mark NSTextField
+
+@implementation NSTextField (DPLocalization)
+
+- (void)setPlaceholderAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"placeholderString"];
+}
+
+- (NSString *)placeholderAutolocalizationKey {
+    return [self autolocKey];
+}
+
+- (void)setLocalizedValue:(id)value forKeyPath:(NSString *)keyPath {
+    if ([keyPath isEqualToString:@"stringValue"] && [self isAttributedKey]) {
+        self.attributedStringValue = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:self.textColor];
+    }
+    else if ([keyPath isEqualToString:@"placeholderString"] && [self isAttributedKey]) {
+        self.placeholderAttributedString = [NSAttributedString dp_attibutedStringWithString:value font:self.font textColor:self.textColor];
+    }
+    else {
+        [super setLocalizedValue:value forKeyPath:keyPath];
+    }
+}
+
+@end
+
+
+#pragma mark NSText
+
+@implementation NSText (DPLocalization)
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"string"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+@end
+
+
+#pragma mark NSWindow
+
+@implementation NSWindow (DPLocalization)
+
+- (void)setAutolocalizationKey:(NSString *)autolocalizationKey {
+    [self setupAutolocalizationWithKey:autolocalizationKey keyPath:@"title"];
+}
+
+- (NSString *)autolocalizationKey {
+    return [self autolocKey];
+}
+
+@end
+
+
+#pragma mark NSImageView
+
+@implementation NSImageView (DPLocalization)
+
+- (void)setAutolocalizationImageName:(NSString *)name {
+    objc_setAssociatedObject(self, (__bridge void *)(kAutolocImageNameKey), name, OBJC_ASSOCIATION_COPY);
+    if ([name length]) {
+        [self addLanguageDidChangeObserver];
+        [self localize];
+    }
+    else {
+        [self removeLanguageDidChangeObserver];
+    }
+}
+
+- (NSString *)autolocalizationImageName {
+    return objc_getAssociatedObject(self, (__bridge const void *)(kAutolocImageNameKey));
+}
+
+- (void)localize {
+    if (self.autolocalizationImageName) {
+        [self setImage:[NSImage localizedImageNamed:self.autolocalizationImageName]];
+    }
+}
+
+@end
+
+#endif
+
+
 #pragma mark - Core Foundation Additions -
+#pragma mark NSBundle
 
 @implementation NSBundle (DPLocalization)
 
@@ -288,10 +608,27 @@ static NSString * const kAutolocOnDeallocBlockKey = @"autolocOnDeallocBlockKey";
 @end
 
 
+#pragma mark NSString
+
 @implementation NSString (DPLocalization)
 
 + (NSString *)autolocalizingStringWithLocalizationKey:(NSString *)localizationKey {
     return [DPAutolocalizationProxy autolocalizingStringWithLocalizationKey:localizationKey];
+}
+
+@end
+
+
+#pragma mark UIImage / NSImage
+
+@implementation DPImage (DPLocalization)
+
++ (DPImage *)localizedImageNamed:(NSString *)name {
+    return [[DPLocalizationManager currentManager] localizedImageNamed:name];
+}
+
++ (DPImage *)autolocalizingImageNamed:(NSString *)name {
+    return [DPAutolocalizationProxy autolocalizingImageNamed:name];
 }
 
 @end

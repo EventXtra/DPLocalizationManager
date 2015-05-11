@@ -11,6 +11,7 @@
 
 
 static NSString * const kLocalizationKeyKey = @"key";
+static NSString * const kLocalizationTableKey = @"table";
 static NSString * const kLocalizationImageNameKey = @"imageName";
 static NSString * const kLocalizationResourseNameKey = @"resourseName";
 static NSString * const kLocalizationResourseTypeKey = @"resourseType";
@@ -35,7 +36,7 @@ static NSString * const kLocalizationBundleKey = @"bundle";
 - (id)surrogate {
     @synchronized(self) {
         if (!self->surrogate) {
-            self->surrogate = DPLocalizedString(self.options[kLocalizationKeyKey], nil);
+            self->surrogate = DPLocalizedStringFromTable(self.options[kLocalizationKeyKey], self.options[kLocalizationTableKey], nil);
         }
         return self->surrogate;
     }
@@ -84,10 +85,29 @@ static NSString * const kLocalizationBundleKey = @"bundle";
 
 @implementation DPAutolocalizationProxy
 
++ (NSNotificationCenter *)notificationCenter {
+    static dispatch_once_t onceToken;
+    static NSNotificationCenter *notificationCenter = nil;
+    dispatch_once(&onceToken, ^{
+        notificationCenter = [[NSNotificationCenter alloc] init];
+    });
+    return notificationCenter;
+}
+
+#pragma mark -
+
 + (NSString *)autolocalizingStringWithLocalizationKey:(NSString *)localizationKey {
+    return [self autolocalizingStringWithLocalizationKey:localizationKey tableName:nil];
+}
+
++ (NSString *)autolocalizingStringWithLocalizationKey:(NSString *)localizationKey tableName:(NSString *)tableName {
     NSParameterAssert(localizationKey != nil);
 
-    return (NSString *)[[DPAutolocalizingString alloc] initWithOptions:@{kLocalizationKeyKey : localizationKey}];
+    NSMutableDictionary *options = [NSMutableDictionary dictionaryWithCapacity:2];
+    [options setValue:localizationKey forKey:kLocalizationKeyKey];
+    [options setValue:tableName forKey:kLocalizationTableKey];
+
+    return (NSString *)[[DPAutolocalizingString alloc] initWithOptions:options];
 }
 
 + (NSString *)autolocalizingPathForResource:(NSString *)name ofType:(NSString *)ext inBundle:(NSBundle *)bundle {
@@ -101,10 +121,9 @@ static NSString * const kLocalizationBundleKey = @"bundle";
     return (NSString *)[[DPAutolocalizingPath alloc] initWithOptions:opts];
 }
 
-+ (UIImage *)autolocalizingImageNamed:(NSString *)imageName {
++ (DPImage *)autolocalizingImageNamed:(NSString *)imageName {
     NSParameterAssert(imageName != nil);
-
-    return (UIImage *)[[DPAutolocalizingImage alloc] initWithOptions:@{kLocalizationImageNameKey : imageName}];
+    return (DPImage *)[[DPAutolocalizingImage alloc] initWithOptions:@{kLocalizationImageNameKey : imageName}];
 }
 
 #pragma mark -
@@ -112,7 +131,7 @@ static NSString * const kLocalizationBundleKey = @"bundle";
 + (instancetype)alloc {
     DPAutolocalizationProxy *result = [super alloc];
     if (result) {
-        [[NSNotificationCenter defaultCenter] addObserver:result selector:@selector(languageDidChangeNotification:) name:DPLanguageDidChangeNotification object:nil];
+        [[self notificationCenter] addObserver:result selector:@selector(languageDidChangeNotification:) name:DPLanguageDidChangeNotification object:nil];
     }
     return result;
 }
@@ -127,9 +146,8 @@ static NSString * const kLocalizationBundleKey = @"bundle";
 }
 
 - (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[[self class] notificationCenter] removeObserver:self];
 }
-
 
 #pragma mark -
 
@@ -196,4 +214,3 @@ static NSString * const kLocalizationBundleKey = @"bundle";
 }
 
 @end
-

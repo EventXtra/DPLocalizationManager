@@ -7,7 +7,11 @@
 //
 
 #import <Foundation/Foundation.h>
+#import "DPLocalizationPlatforms.h"
+
 #import "NSObject+DPLocalization.h"
+#import "NSAttributedString+DPLocalization.h"
+
 #import "DPAutolocalizationProxy.h"
 
 
@@ -23,6 +27,12 @@
 @property (nonatomic, copy) NSString *currentLanguage;
 
 /**
+ @property defaultStringsTableName
+ @brief Default string table name used for localization.
+ */
+@property(nonatomic, copy) NSString *defaultStringTableName;
+
+/**
  @brief Returns shared DPLocalizationManager object.
 
  @return Returns instance used for control locazition.
@@ -31,25 +41,35 @@
 
 /**
  @brief Returns a localized version of a string.
- @param key The key for a string in the Localizable.strings table.
+ @param key     The key for a string in the -[self defaultStringsTableName] table.
 
- @return Returns a localized version of a string for selected language. If string not found return the result of NSLocalizedString macro.
+ @return The result is invoking of -[self localizedStringForKey:key table:self.defaultStringsTableName].
  */
 - (NSString *)localizedStringForKey:(NSString *)key;
 
 /**
+ @brief Returns a localized version of a string.
+ @param key     The key for a string in the table identified by tableName.
+ @param table   The receiver’s string table to search. If tableName is nil or is an empty string, the method attempts to use the table in Localizable.strings.
+ 
+ @return Returns a localized version of a string for selected language. If string not found return the result of NSLocalizedStringFromTable macro.
+ */
+- (NSString *)localizedStringForKey:(NSString *)key table:(NSString *)table;
+
+/**
  @brief Returns a localized version of an image.
- @param name The name for an image in the Localizable.strings table.
+ @param name    The name associated with the desired image.
 
  @return Returns a localized version of an image for selected language. If image not found return the result of invoking -[UIImage imageNamed:].
  */
-- (UIImage *)localizedImageNamed:(NSString *)name;
+
+- (DPImage *)localizedImageNamed:(NSString *)name;
 
 /**
  @brief Returns the full pathname for the resource identified by the specified name and file extension for selected language.
- @param name The name of the resource file.
- @param extension If extension is an empty string or nil, the extension is assumed not to exist and the file is the first file encountered that exactly matches name.
- @param bundle If bundle is nil, the bundle is assumed as main bundle.
+ @param name        The name of the resource file.
+ @param extension   If extension is an empty string or nil, the extension is assumed not to exist and the file is the first file encountered that exactly matches name.
+ @param bundle      If bundle is nil, the bundle is assumed as main bundle.
 
  @return The result is invoking of [bundle pathForResource:name ofType:extension inDirectory:nil forLocalization:currentLanguage]. If result is nil return [bundle pathForResource:name ofType:extension] instead.
  */
@@ -69,22 +89,58 @@
  */
 + (NSString *)preferredLanguage;
 
-@property(nonatomic, copy) NSString *localizationFileName;
+@property(nonatomic, copy) NSString *localizationFileName DEPRECATED_MSG_ATTRIBUTE("Use 'defaultStringTableName' property instead. This property will be removed in further releases.");
 @property BOOL usingPlist;
 
 @end
 
 
-#define DPLocalizedString(key, comment) ([[DPLocalizationManager currentManager] localizedStringForKey:key])
+/**
+ @return The result is invoking of [[DPLocalizationManager currentManager] localizedStringForKey:key];
+ */
+NSString * DPLocalizedString(NSString *key, NSString *comment);
 
-#define dp_get_current_language() ([[DPLocalizationManager currentManager] currentLanguage])
-#define dp_set_current_language(lang) ([[DPLocalizationManager currentManager] setCurrentLanguage:lang])
+/**
+ @return The result is invoking of [[DPLocalizationManager currentManager] localizedStringForKey:key table:table];
+ */
+NSString * DPLocalizedStringFromTable(NSString *key, NSString *table, NSString *comment);
 
-#define dp_get_language_display_name(lang) ([[[[NSLocale alloc] initWithLocaleIdentifier:lang] displayNameForKey:NSLocaleIdentifier value:lang] capitalizedString])
-#define dp_get_current_language_display_name() (dp_get_language_display_name(dp_get_current_language()))
+/**
+ @return The result is invoking of [DPAutolocalizationProxy autolocalizingStringWithLocalizationKey:key];
+ */
+NSString * DPAutolocalizedString(NSString *key, NSString *comment);
 
-#define dp_get_current_filename() ([[DPLocalizationManager currentManager] localizationFileName])
-#define dp_set_current_filename(__FILENAME__) ([[DPLocalizationManager currentManager] setLocalizationFileName:__FILENAME__])
+/**
+ @return The result is invoking of [DPAutolocalizationProxy autolocalizingStringWithLocalizationKey:key tableName:tableName];
+ */
+NSString * DPAutolocalizedStringFromTable(NSString *key, NSString *tableName, NSString *comment);
+
+/**
+ @return The result is invoking of [[DPLocalizationManager currentManager] currentLanguage];
+ */
+NSString * dp_get_current_language();
+
+/**
+ @brief Equal to [[DPLocalizationManager currentManager] setCurrentLanguage:lang];
+ */
+void dp_set_current_language(NSString *lang);
+
+
+/**
+ @brief     Return language name that can be shown to user.
+ @param     lang Language code (i.e.: "en", "ru", "fr" and etc.)
+ @return    The result is invoking of [[[[NSLocale alloc] initWithLocaleIdentifier:lang] displayNameForKey:NSLocaleIdentifier value:lang] capitalizedString];
+ */
+NSString * dp_get_language_display_name(NSString *lang);
+
+/**
+ @return    The result is invoking of dp_get_language_display_name(dp_get_current_language())
+ */
+NSString * dp_get_current_language_display_name();
+
+
+NSString * dp_get_current_filename() DEPRECATED_MSG_ATTRIBUTE("Use 'defaultStringTableName' property instead. This function will be removed in further releases.");
+void dp_set_current_filename(NSString *filename) DEPRECATED_MSG_ATTRIBUTE("Use 'defaultStringTableName' property instead. This function will be removed in further releases.");
 
 #define dp_set_using_plist(__USING_PLIST__) ([[DPLocalizationManager currentManager] setUsingPlist:__USING_PLIST__])
 
